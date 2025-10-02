@@ -21,15 +21,23 @@ int main(void) {
     // location of buffer.
 
     // PLACE YOUR CODE HERE
-
+      if (*current_char == "" || *current_char == "\n" || *current_char == "\t"){
+        if (prev_char_not_ordinary == 0){
+        *current_char = '\0';
+        prev_char_not_ordinary = 1;
+        }
+      }
     // If the current character is an ordinary character
     // after a special character save the pointer to it in
     // the words[] array.
     else if (prev_char_not_ordinary) {
       // PLACE YOUR CODE HERE
+      words[i++] = current_char;
+      prev_char_not_ordinary = 0;
     }
     // Move the pointer in buff by one place.
     // PLACE YOUR CODE HERE
+    current_char++;
   }
   *current_char = '\0';
   printf("\n");
