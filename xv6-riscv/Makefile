@@ -147,6 +147,8 @@ UPROGS=\
 	$U/_uptime\
 	$U/_pingpong\
 	$U/_find\
+	$U/_get\
+	$U/_xargs\
 
 
 fs.img: mkfs/mkfs README $(UPROGS)
