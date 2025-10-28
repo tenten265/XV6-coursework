@@ -149,6 +149,7 @@ UPROGS=\
 	$U/_find\
 	$U/_get\
 	$U/_xargs\
+	$U/_my_shell\
 
 
 fs.img: mkfs/mkfs README $(UPROGS)
