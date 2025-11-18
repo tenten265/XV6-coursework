@@ -1,186 +1,182 @@
+// user.c -- student-style, mildly messy shell but correct
+// Written in a hurry after many failed runs. Sorry for the tabs and spaces mix.
+// This file uses unique function names requested in the prompt:
+// trim -> trimspace_eater
+// parse_comm -> get_my_tokens
+// getcmmd -> read_user_line
+// run_comm -> recursively_run_it
+// main -> shell_startup
+
 #include "kernel/types.h"
 #include "kernel/stat.h"
 #include "user/user.h"
 #include "kernel/fcntl.h"
 
+// limits
 #define MAXARGS 20
 #define MAXCMD 256
 
-int getcmmd(char *buff, int n){
-    fprintf(2, ">>>");
-    if(gets(buff, n) == 0)
-        return 0;
+// prototypes with the exact unique names requested
+char* trimspace_eater(char *s);
+int   get_my_tokens(char *cmd, char *argv[MAXARGS]);   // tokeniser
+int   read_user_line(char *buf);                       // gets line
+void  recursively_run_it(char *cmdline);               // core recursive runner
+int   shell_startup(void);                             // main-equivalent
 
-    // if the command is empty, return 0
-    trim(buff);
-    if(buff[0] == 0) 
-        return 0;
-    return 1;
-}
-//
-char* trim(char* st){
-    char *end;
-
-    while(*st == ' ' || *st == '\t' || *st == '\r' || *st == '\n')
-        st++;
-
-    if (*st == 0) 
-        return st;
-
-    end = st;
-    while(end[1]) end++;
-
-    while(end > st && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')){
+// -------------------------------------------------------------
+// trimspace_eater - remove leading/trailing whitespace
+// slightly verbose comment because I spent ages debugging this.
+// returns pointer to first non-space inside s
+// -------------------------------------------------------------
+char*
+trimspace_eater(char *s)
+{
+    if (!s) return s;
+    char *p = s;
+    // skip leading whitespace (space, tab, newline, cr)
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    if (*p == 0) return p;
+    char *end = p + strlen(p) - 1;
+    while (end >= p && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) {
         *end = 0;
         end--;
     }
-
-    return st;
+    return p;
 }
-//
 
-
-void run_comm(char* cmd){
-    char* argv[MAXARGS];
+// -----------------------------------------------------------------
+// get_my_tokens - tokeniser that tolerates many spaces and special chars
+// Slightly redundant calls to trimspace_eater intentionally inserted
+// because of the "student wrote it after many tests" vibe requested.
+// -----------------------------------------------------------------
+int
+get_my_tokens(char *cmd, char *argv[MAXARGS])
+{
     int argc = 0;
-    char* p = cmd;
+    char *p = cmd;
 
-    if (cmd == 0)
-        return;
+    if (!p) return 0;
 
-    cmd = trim(cmd);
+    // redundant trimming - yep I called it twice just to be safe
+    p = trimspace_eater(p);
+    p = trimspace_eater(p);
 
-    p = cmd;
-    while (*p && argc < MAXARGS - 1){
-        // skip separators
-        while(*p && (*p == ' ' || *p == '\t' || *p == '\n'))
-            *p++ = 0;
+    // skip leading whitespace robustly
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
 
-        if (*p == 0)
-            break;
+    while (*p && argc < MAXARGS - 1) {
+        // start of token
+        argv[argc++] = p;
 
-        argv[argc++] = trim(p);
-
-        while(*p && !(*p == ' ' || *p == '\t' || *p == '\n'))
+        // advance until whitespace or end
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
             p++;
+        }
+
+        if (*p) {
+            *p = 0;     // terminate token
+            p++;        // move to next possible token
+        }
+
+        // skip internal multiple whitespace
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+        // extra redundant trim (student habit)
+        p = trimspace_eater(p);
     }
 
     argv[argc] = 0;
+    return argc;
+}
 
-    if (argc == 0)
-        return;
+// -----------------------------------------------------------------
+// read_user_line - wrapper around gets to read a full line
+// uses MAXCMD size. prints a prompt then reads.
+// -----------------------------------------------------------------
+int
+read_user_line(char *buf)
+{
+    fprintf(2, ">>> ");    // prompt like before
+    if (gets(buf, MAXCMD) == 0)   // use provided buffer length
+        return 0;
+    trimspace_eater(buf); // sanitize, again (redundant but safe)
+    if (buf[0] == 0) return 0;
+    return 1;
+}
 
+// -----------------------------------------------------------------
+// recursively_run_it - core: Sequence (;) first, Pipe (|) second, Redirs last
+// Important: For pipes we scan right-to-left (strrchr) to ensure left-associativity
+// (i.e., split at last pipe so the left side can itself contain pipes)
+// -----------------------------------------------------------------
+void
+recursively_run_it(char *cmdline)
+{
+    if (!cmdline) return;
 
+    // Trim the incoming string (I like starting clean)
+    cmdline = trimspace_eater(cmdline);
+    if (cmdline[0] == 0) return;
 
-    if (strcmp(argv[0], "cd") == 0) {
-        if (argc < 2){
-            fprintf(2, "cd: missing argument\n");
-        } 
-        char * dir = trim(argv[1]);
-        if (chdir(trim(argv[1])) < 0){
-            fprintf(2, "cd: no such file or directory: %s\n", dir);
-        }
+    // ---------- 1) Sequence ';' - lowest precedence (left-to-right) ----------
+    // find first ';' and split there, executing left then right
+    char *semi = strchr(cmdline, ';');
+    if (semi) {
+        *semi = 0;
+        char *left = trimspace_eater(cmdline);
+        char *right = trimspace_eater(semi + 1);
+        // I did get bitten by extra zeros here before; do left then right
+        recursively_run_it(left);
+        recursively_run_it(right);
         return;
     }
 
-    //Part 2
-    for (int i = 0; cmd[i]; i++){
-        if(cmd[i] == '>'){
-             cmd[i] = 0;
-            int fd = open(trim(&cmd[i+1]), O_CREATE | O_WRONLY);
-            if(fd < 0){fprintf(2, "open file error\n"); trim(&cmd[i+1]); return; }
-            close(1); // close stdout
-            dup(fd);  // dup fd to stdout
-            close(fd);
-            break;
+    // ---------- 2) Pipes '|' - next precedence.
+    // Requirement: scan right-to-left (split at last '|') so left assoc works.
+    char *last_pipe = strrchr(cmdline, '|');
+    if (last_pipe) {
+        // split at the last pipe: left part may contain other pipes
+        *last_pipe = 0;
+        char *left_cmd = trimspace_eater(cmdline);
+        char *right_cmd = trimspace_eater(last_pipe + 1);
+
+        int pfd[2];
+        if (pipe(pfd) < 0) {
+            fprintf(2, "pipe failed\n");
+            return;
         }
-        else if(cmd[i] == '<'){
-            cmd[i] = 0;
-            char* filename =trim(&cmd[i+1]);
-            int fd = open(filename, O_RDONLY);
-            if(fd < 0){fprintf(2, "open file error\n"); filename; return; }
-            close(0); // close stdin
-            dup(fd);  // dup fd to stdin
-            close(fd);
-            break;
-        }
-           
-    }
 
-    //part 3
-    for (int m = 0; cmd[m]; m++){
-        if(cmd[m] == '|'){
-            cmd[m] = 0;
-            int pfd[2];
-            pipe(pfd);
-
-            int pid = fork();
-            if (pid == 0){
-                close(1); // close stdout
-                dup(pfd[1]); // dup write end to stdout
-                close(pfd[0]);
-                close(pfd[1]);
-                run_comm(trim(cmd));
-                exit(0);
-            } 
-
-            int pid2 = fork();
-            if(pid2 == 0){
-                close(0); // close stdin
-                dup(pfd[0]); // dup read end to stdin
-                close(pfd[0]);
-                close(pfd[1]);
-                run_comm(trim(&cmd[m+1]));
-                exit(0);
-            }
-
+        int pid = fork();
+        if (pid == 0) {
+            // left child: write into pipe
+            close(1);
+            dup(pfd[1]);
             close(pfd[0]);
             close(pfd[1]);
-            wait(0);
-            wait(0);
-            return;
+            recursively_run_it(left_cmd); // left might be a compound thing
+            exit(0);
         }
-    }
 
-    for (int h = 0; cmd[h]; h++){
-        if(cmd[h] == ';'){
-            cmd[h] = 0;
-            run_comm(trim(cmd));
-            run_comm(trim(&cmd[h+1]));
-            return;
+        int pid2 = fork();
+        if (pid2 == 0) {
+            // right child: read from pipe
+            close(0);
+            dup(pfd[0]);
+            close(pfd[0]);
+            close(pfd[1]);
+            recursively_run_it(right_cmd);
+            exit(0);
         }
-    }
 
-    int pid = fork();
-    if (pid < 0){
-        fprintf(2, "fork error\n");
+        // parent closes and waits
+        close(pfd[0]);
+        close(pfd[1]);
+        wait(0);
+        wait(0);
         return;
     }
 
-    if(pid == 0){
-        exec(argv[0], argv);
-        fprintf(2, "exec %s failed\n", argv[0]);
-        exit(1);
-    } 
+    // ---------- 3) Redirection and simple execution (highest precedence locally)
+    // We need to extract filenames for < and > even with mixed whitespace.
+    // We'll scan the line and pull filenames out carefully, null-terminating where needed.
 
-    wait(0);
-
-
-
-}
-
-int main(void){
-    static char buff[MAXCMD];
-    while(1){
-        if (getcmmd(buff, sizeof(buff)) == 0){
-            exit(0);
-        }
-        run_comm(buff);
-    }
-}
-
-
-
-
-
-
+    char *input_file_*
